@@ -517,13 +517,48 @@
       h('span', { class: 'hotspot__disc' }, editing ? h('span', { class: 'hotspot__num', text: String(index + 1) }) : icon('arrow-up')),
       h('span', { class: 'hotspot__label', text: label })
     );
+    // Knižnica si na tento prvok vešia vlastný poslucháč na transitionend (bublajúci z detí,
+    // napr. zväčšenia krúžku pri hover/focus). Ak marker medzičasom zanikne pri prechode do inej
+    // scény, poslucháč pristúpi na už zrušený objekt. Udalosť preto ku knižnici vôbec nepustíme.
+    el.addEventListener('transitionend', (e) => e.stopPropagation(), true);
     if (editing) {
       attachDrag(el, hs);
       el.addEventListener('click', () => selectHotspot(hs.id));
     } else {
-      el.addEventListener('click', () => goToScene(hs.target));
+      attachTap(el, () => goToScene(hs.target));
     }
     return el;
+  }
+
+  /**
+   * Ťuknutie na bod prechodu v režime Prehliadka.
+   * Na dotykových zariadeniach by sa „click“ nemusel vôbec spustiť: dotyk najprv
+   * zachytí samotný 360° prehliadač (kvôli otáčaniu kamery) a prehliadač potom
+   * podľa špecifikácie zruší nasledujúci syntetický „click“. Preto tu akciu
+   * spúšťame priamo z pointerdown/pointerup (a odlišujeme ťuknutie od potiahnutia),
+   * namiesto spoliehania sa na natívny „click“.
+   */
+  function attachTap(el, onTap) {
+    const stop = (e) => e.stopPropagation();
+    el.addEventListener('mousedown', stop);
+    el.addEventListener('touchstart', stop, { passive: true });
+    let sx = 0, sy = 0, st = 0, tracking = false;
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button !== undefined && e.pointerType === 'mouse' && e.button !== 0) return;
+      e.stopPropagation();
+      sx = e.clientX; sy = e.clientY; st = Date.now(); tracking = true;
+      try { el.setPointerCapture(e.pointerId); } catch (err) { /* nič */ }
+    });
+    el.addEventListener('pointerup', (e) => {
+      e.stopPropagation();
+      if (!tracking) return;
+      tracking = false;
+      if (Math.hypot(e.clientX - sx, e.clientY - sy) < 10 && Date.now() - st < 600) setTimeout(() => onTap(e), 0);
+    });
+    el.addEventListener('pointercancel', () => { tracking = false; });
+    // klávesnica (Enter/Medzerník) vyvolá „click“ bez pointer udalostí – tú necháme prejsť,
+    // no ďalej ju nešírime (so súradnicami 0,0 by mohla zmiasť samotný prehliadač panorámy)
+    el.addEventListener('click', (e) => { e.stopPropagation(); if (e.detail === 0) setTimeout(() => onTap(e), 0); });
   }
 
   function refreshMarkers() {
